@@ -3,6 +3,7 @@ import platform
 import csv
 import math
 import shutil 
+import psutil
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as mticker
@@ -27,7 +28,231 @@ from itertools import combinations
 import warnings
 import peakutils
 
-def plot_spectra_2D_overview(exp,title,other):
+def sys_checks(parent_dir,prots,centroided,enr_score_cutoff,p_score_cutoff,peak_RT,peps_sec,reps,nr_EICs,LOD,mzML):
+    openms_path = os.path.join(os.getcwd(), 'venv', 'Lib', 'site-packages', 'pyopenms', 'share', 'OpenMS')
+    if platform.system() == 'Windows':     # Windows (either 32-bit or 64-bit)
+        os.system(f'set OPENMS_DATA_PATH={openms_path};%OPENMS_DATA_PATH%')
+        os.environ["OPENMS_DATA_PATH"] = openms_path # try 2 ways so maybe it doesn't get mad
+    elif platform.system() == "Linux" or "Darwin":      # linux or Mac OS (Darwin)
+        # os.system(f'export OPENMS_DATA_PATH = {openms_path}')
+        print(f'Warning: MSConvert not compatible with {platform.system()}')
+    else:
+        raise Exception("Error identifying operating system")
+
+    try:
+        ### Check inputs and raise warnings/exceptions
+        mem = psutil.virtual_memory().total
+        if mem < 16E9:
+            warnings.warn(f'16GB of RAM is recommended, current system has {mem}')
+        check_files = []
+        for file in sorted(os.listdir(parent_dir)):
+            if file.endswith('.raw') and any(prot in file for prot in prots):
+                check_files.append(file)
+        print(f'RAW files found to analyze: {check_files}')
+        for prot in prots:
+            if not any(prot in file for file in check_files):
+                warnings.warn(f'RAW files for {prot} not found in data directory')
+        if not check_files and not centroided:
+            mess = 'Data directory does not contain any RAW files'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if enr_score_cutoff > 1 or enr_score_cutoff < 0:
+            mess = 'Enrichment score cutoff out of range (0 to 1)'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if p_score_cutoff < 0 or p_score_cutoff > 1:
+            mess = 'P score cutoff out of range (0 to 1)'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if peak_RT < 0:
+            mess = 'Peak retention time is less than 0'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if peps_sec < 1:
+            mess = "Max peptides sequenced by Orbi less than 1"
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if reps < 1:
+            mess = 'Number of replicates is less than 1'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if nr_EICs < 1:
+            mess = 'Number of EICs specified is less than 1'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+        if LOD < 0:
+            mess = 'Minimum intensity for peak detection below 0'
+            warnings.warn('Input error:',mess)
+            raise Exception(mess)
+    except:
+        print('Error in inputs! Please check your entries')
+
+def directory_setup(parent_dir,folder,save_dir,prots,centroided):
+    if not os.path.isdir(save_dir):         # Checks if data is already centroided, and if so it will create save directory
+        os.mkdir(save_dir)                  # (which is same as data directory if centroided = False)
+
+    eic_dirs = []
+    eic_dirs_spec = []
+    eic_dirs_nonspec = []
+    eic_dirs_other = []
+    for name in prots:
+        eic_dir = os.path.join(parent_dir,folder,'EICs of ' + name)
+        eic_dirs.append(eic_dir)
+        eic_dir_spec = os.path.join(eic_dir,'EICs of ' + name + ' Specific')
+        eic_dirs_spec.append(eic_dir_spec)
+        eic_dir_nonspec = os.path.join(eic_dir,'EICs of ' + name + ' Nonspecific')
+        eic_dirs_nonspec.append(eic_dir_nonspec)
+        eic_dir_other = os.path.join(eic_dir,'EICs of ' + name + ' Unclear Specificity')
+        eic_dirs_other.append(eic_dir_other)
+        if not os.path.isdir(eic_dir):
+            os.mkdir(eic_dir)
+        if not os.path.isdir(eic_dir_spec):
+            os.mkdir(eic_dir_spec)
+        if not os.path.isdir(eic_dir_nonspec):
+            os.mkdir(eic_dir_nonspec)
+        if not os.path.isdir(eic_dir_other):
+            os.mkdir(eic_dir_other)
+
+    png_dir = os.path.join(parent_dir,folder,'PNGs')
+    if not os.path.isdir(png_dir):
+        os.mkdir(png_dir)
+        
+    if not centroided:
+        PRTC_dir = os.path.join(parent_dir,folder,'PRTC Data')
+        if not os.path.isdir(PRTC_dir):
+            os.mkdir(PRTC_dir)
+
+    return eic_dirs,eic_dirs_spec,eic_dirs_nonspec,eic_dirs_other,png_dir,PRTC_dir
+
+def data_centroiding(centroided,parent_dir,folder,PRTC_dir,data_dir):
+    if centroided:
+        data_dir = os.path.join(parent_dir,'PRTC Time Points 2022_07_14-12_36_18_PM','centroided') # would need to be changed if true
+        PRTC_dir = os.path.join(parent_dir)
+    else:
+        if not os.path.isdir(data_dir):         # Checks that the data directory exists
+            os.mkdir(data_dir)       
+
+        if os.path.exists(os.path.join(parent_dir,folder,'centroided')):   # If the same data directory exists, delete and remake it 
+            shutil.rmtree(os.path.join(parent_dir,folder,'centroided'))    #   (though it shouldn't thanks to the time stamp)
+        os.mkdir(os.path.join(parent_dir,folder, 'centroided'))
+
+        count = 1
+        for file in sorted(os.listdir(parent_dir)):               # Iterate through each folder and centroid the data
+            if file.endswith('.mzML'):
+                exp_raw = MSExperiment()
+                MzMLFile().load(os.path.join(parent_dir,file), exp_raw)
+                
+                print(f'{file} loaded')
+                exp_centroid = MSExperiment()
+                pickme = PeakPickerHiRes()
+                params_pick = pickme.getParameters()
+                params_pick.setValue('signal_to_noise',0.0)  # 0 (disabled) is default
+                params_pick.setValue('spacing_difference_gap',4.0) # 4 is default
+                params_pick.setValue('spacing_difference',1.5) # 1.5 is default
+                params_pick.setValue('missing',1) # 1 is default
+                params_pick.setValue('report_FWHM','true') # false is default
+                params_pick.setValue('ms_levels',[1])
+                pickme.setParameters(params_pick)
+                pickme.pickExperiment(exp_raw, exp_centroid)
+                print('peaks picked')
+                if 'PRTC_i' in file:
+                    MzMLFile().store(os.path.join(PRTC_dir, file), exp_centroid)       
+                else:
+                    MzMLFile().store(os.path.join(data_dir, 'centroided', file), exp_centroid)       
+                del exp_raw 
+                print('another one done')
+                print(count)
+                count -= -1
+        data_dir = os.path.join(parent_dir,folder,'centroided')
+        return data_dir
+
+def data_visualization(check_data,data_dir,png_dir,parent_dir):
+    rt_cent = []
+    int_cent = []
+    if check_data:
+        ## plotting TIC 
+        for file in sorted(os.listdir(data_dir)):
+            if file.endswith('.mzML'):
+                exp_test = MSExperiment()
+                MzMLFile().load(os.path.join(data_dir,file), exp_test)
+                print('loaded')
+
+                # choose one of the following three methods to access the TIC data
+                # 1) recalculate TIC data with the calculateTIC() function
+                tic = exp_test.calculateTIC()
+                retention_times, intensities = tic.get_peaks()
+                rt_cent.append(retention_times)
+                int_cent.append(intensities)
+
+                # plot retention times and intensities and add labels
+                fig, ax = plt.subplots(1,1,figsize=(36,12))
+                ax.plot(retention_times, intensities)
+                print(f'Fifth percentile = {np.percentile(intensities,5,axis=0)}')
+                ax.set_title(f'TIC of {file} (Centroided)',fontsize=36)
+                ax.set_xlabel('time (s)',fontsize=30)
+                ax.set_ylabel('intensity (cps)',fontsize=30)
+                ax.tick_params(axis='both',labelsize=24)
+                plt.show()
+                fig.savefig(os.path.join(png_dir,file[:-5] + ' TIC (centroided).png'))
+            
+            
+## plotting TIC 
+    rt_pro = []
+    int_pro = []
+    names = []
+    if check_data:
+        for file in sorted(os.listdir(parent_dir)):
+            if file.endswith('.mzML'):
+                exp_test = MSExperiment()
+                MzMLFile().load(os.path.join(data_dir,file), exp_test)
+                print('loaded')
+
+                # choose one of the following three methods to access the TIC data
+                # 1) recalculate TIC data with the calculateTIC() function
+                tic = exp_test.calculateTIC()
+                retention_times, intensities = tic.get_peaks()
+                rt_pro.append(retention_times)
+                int_pro.append(intensities)
+                names.append(file[:-5])
+                
+                # plot retention times and intensities and add labels
+                fig, ax = plt.subplots(1,1,figsize=(36,12))
+                ax.plot(retention_times, intensities)
+                print(f'Fifth percentile = {np.percentile(intensities,5,axis=0)}')
+                ax.set_title(f'TIC of {file} (Profile)',fontsize=26)
+                ax.set_xlabel('time (s)',fontsize=30)
+                ax.set_ylabel('intensity (cps)',fontsize=30)
+                ax.tick_params(axis='both',labelsize=24)
+                fig.savefig(os.path.join(png_dir,file[:-5] + ' TIC (profile).png'))
+                plt.show()
+        for i in range(len(names)):
+            x = rt_pro[i]
+            y = [a_i - b_i for a_i, b_i in zip(int_pro[i], int_cent[i])]
+            plt.plot(x,y)
+            plt.xlabel('Retention time (sec)')
+            plt.ylabel('Residual')
+            plt.title('TIC Residuals')
+            plt.show()
+            plt.savefig(os.path.join(png_dir,names[i] + ' Residuals.png'))
+
+    '''centroided'''
+    if check_data:
+        for file in sorted(os.listdir(data_dir)):
+            if file.endswith('mzML'):
+                exp_2D = MSExperiment()
+                MzMLFile().load(os.path.join(data_dir,file),exp_2D)
+                plot_spectra_2D_overview(exp_2D,file[:-5],'centroided')
+                
+    '''profile'''
+    if check_data:
+        for file in sorted(os.listdir(parent_dir)):
+            if file.endswith('mzML'):
+                exp_2D = MSExperiment()
+                MzMLFile().load(os.path.join(data_dir,file),exp_2D)
+                plot_spectra_2D_overview(exp_2D,file[:-5],'profile')
+
+
+def plot_spectra_2D_overview(exp,title,other,png_dir):
     '''Utilizes bilinear interpolation to graph the 2D RT vs m/z plot more quickly.'''
     '''
     Example:
@@ -74,6 +299,61 @@ def plot_spectra_2D_overview(exp,title,other):
     plt.savefig(os.path.join(png_dir,filename))
     plt.show()
     print('showing plot...')
+
+def alignment_check(consensus_map,feature_maps,png_dir,new_map_RTs,files,original_RTs_dict):
+    ### OLD VERSION, CHECK THAT IT EVEN WORKS
+    feature_map_RTs_aligned = []
+    consensus_RTs_aligned = []
+    consensus_mzs_aligned = [cf.getMZ() for cf in consensus_map]
+    for i,fm in enumerate(feature_maps):
+        consensus_RTs_aligned.append([feat[i] for feat in new_map_RTs])
+        feature_map_RTs_aligned.append([f.getRT() for f in fm])
+        plt.plot([f.getRT() for f in fm],[f.getMZ() for f in fm],'k.',markersize=10,label='feature map RTs')
+        plt.plot([feat[i] for feat in new_map_RTs],consensus_mzs_aligned,'y.',label='aligned feature RTs')
+        plt.savefig(os.path.join(png_dir,'Alignment Check Should Overlap ' + files[i] + '.png'))
+        plt.show()
+        
+    fixed_RT_maps = []
+    for i,RT_map in enumerate(consensus_RTs_aligned):
+        fixed_RT_map = RT_map
+        feature_map_RTs_original = original_RTs_dict[i]
+        feature_map_RTs_aligned = [f.getRT() for f in feature_maps[i]]
+        mzs_feature_map = [f.getMZ() for f in feature_maps[i]]
+        for j,RT in enumerate(RT_map):
+            if RT in feature_map_RTs_aligned:
+                idx = feature_map_RTs_aligned.index(RT)
+                fixed_RT_map[j] = feature_map_RTs_original[idx]
+        fixed_RT_maps.append(fixed_RT_map)
+        
+    for i,RT_map in enumerate(fixed_RT_maps):
+        plt.plot(RT_map,consensus_mzs_aligned,'k.',label='aligned feature RTs')
+        plt.plot([f.getRT() for f in feature_maps[i]],[f.getMZ() for f in feature_maps[i]],'y.',label='original feature RTs')
+        plt.xlim([0,5500])
+        plt.ylim([200,900])
+        plt.savefig(os.path.join(png_dir,'Alignment Check Should Not Overlap ' + files[i] + '.png'))
+        plt.show()
+        
+    fixed_RT_maps_formatted = []
+    for i in range(len(new_map_RTs)):
+        feat_RTs = [RT[i] for RT in fixed_RT_maps]
+        fixed_RT_maps_formatted.append(feat_RTs)
+
+def PRTC_stats(areas_ref_full,files,ref_feature_mass,png_dir):
+    for i,areas in enumerate(areas_ref_full):
+        z_score = t.ppf(1-0.05,len(areas))
+        std = np.std(areas)
+        upper = [area+z_score*std/len(areas) for area in areas]
+        lower = [area-z_score*std/len(areas) for area in areas]
+        plt.plot(files,areas, label=f'PRTC mass {np.round(ref_feature_mass[i],2)}')
+        plt.plot(files,lower,'k--',label=f'95% CI Lower bound')
+        plt.plot(files,upper,'k--',label=f'95% CI Upper bound')
+        plt.xlabel('Replicate Name')
+        plt.ylabel('Area')
+        plt.title(f'PRTC Normalization Areas, RSD = {std/np.average(areas)*100:.1f}%'.format())
+        plt.legend(bbox_to_anchor=(1.04,0.5), loc="center left", borderaxespad=0)
+        plt.xticks(rotation = 90)
+        plt.show()
+        plt.savefig(os.path.join(png_dir,f'PRTC Normalization {np.round(ref_feature_mass[i],3)}.png'),bbox_inches='tight')
 
 def games_howell_scipy(names,groups,data,reps=3,alpha=0.05):  
     #'''stealing this from https://aaronschlegel.me/games-howell-post-hoc-multiple-comparisons-test-python.html
@@ -463,6 +743,446 @@ def enr_scoring(max_int_features,ref_val,prot_names,prots,reps=3,p_score_cutoff=
         enr_scores.append(e_prot)
         enr_scores_normalized.append(e_prot_normalized)
     return np.asarray(enr_scores),np.asarray(enr_scores_normalized),p_vals,specificity,spec_label
+
+def setup_output(prots,spec_label,enrichmentscores,enrichment_normalized,pvals,feat_RT_filtered,feat_RT_orig_filtered,feat_mz_filtered,feat_z_filtered,areas_savgol):
+    es_graphing = [ [] for _ in range(len(prots))]
+    es_normalized_graphing = [ [] for _ in range(len(prots))]
+    ps_graphing = [ [] for _ in range(len(prots))]
+    RTs_graphing = [ [] for _ in range(len(prots))]
+    RTs_graphing_orig = [ [] for _ in range(len(prots))]
+    mzs_graphing = [ [] for _ in range(len(prots))]
+    z_graphing = [ [] for _ in range(len(prots))]
+    areas_graphing = [ [] for _ in range(len(prots))]
+
+    es_nonspecific = []
+    es_normalized_nonspecific = []
+    ps_nonspecific = []
+    RTs_nonspecific = []
+    RTs_nonspecific_orig = []
+    mzs_nonspecific = []
+    z_nonspecific = []
+    areas_nonspecific = []
+
+    es_unclear = []
+    es_normalized_unclear = []
+    ps_unclear = []
+    RTs_unclear = []
+    RTs_unclear_orig = []
+    mzs_unclear = []
+    z_unclear = []
+    areas_unclear = []
+
+
+    for i,label in enumerate(spec_label):
+        if label in prots:
+            prot_name = np.where(np.array(prots) == label)[0][0]  # actually a number lol
+            es_graphing[prot_name].append(enrichmentscores[prot_name][i])
+            es_normalized_graphing[prot_name].append(enrichment_normalized[prot_name][i])
+            ps_graphing[prot_name].append(pvals[i])
+            RTs_graphing[prot_name].append(feat_RT_filtered[i])
+            RTs_graphing_orig[prot_name].append(feat_RT_orig_filtered[i])
+            mzs_graphing[prot_name].append(feat_mz_filtered[i])
+            z_graphing[prot_name].append(feat_z_filtered[i])
+            areas_graphing[prot_name].append(areas_savgol[i])
+        elif label == 'Nonspecific':
+            es_nonspecific.append(enrichmentscores[:,i])
+            es_normalized_nonspecific.append(enrichment_normalized[:,i])
+            ps_nonspecific.append(pvals[i])
+            RTs_nonspecific.append(feat_RT_filtered[i])
+            RTs_nonspecific_orig.append(feat_RT_orig_filtered[i])
+            mzs_nonspecific.append(feat_mz_filtered[i])
+            z_nonspecific.append(feat_z_filtered[i])
+            areas_nonspecific.append(areas_savgol[i])
+        else:
+            es_unclear.append(enrichmentscores[:,i])
+            es_normalized_unclear.append(enrichment_normalized[:,i])
+            ps_unclear.append(pvals[i])
+            RTs_unclear.append(feat_RT_filtered[i])
+            RTs_unclear_orig.append(feat_RT_orig_filtered[i])
+            mzs_unclear.append(feat_mz_filtered[i])
+            z_unclear.append(feat_z_filtered[i])
+            areas_unclear.append(areas_savgol[i])
+    return es_graphing,es_normalized_graphing,ps_graphing,RTs_graphing,RTs_graphing_orig,mzs_graphing,z_graphing,areas_graphing,es_nonspecific,es_normalized_nonspecific,ps_nonspecific,RTs_nonspecific,RTs_nonspecific_orig, \
+    mzs_nonspecific,z_nonspecific,areas_nonspecific, es_unclear,es_normalized_unclear,ps_unclear,RTs_unclear,RTs_unclear_orig,mzs_unclear,z_unclear,areas_unclear
+
+def enrichment_rankings(prots,es_graphing,es_normalized_graphing,png_dir):
+    if len(prots) > 2:
+        fig,axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(14,14),sharey=True)
+        for i in range(math.ceil(len(prots)/2)):
+            for j in range(2):
+                try:
+                    scores = es_graphing[2*i+j]
+                    scores = np.sort(scores)[::-1]
+                    scores_normalized = es_normalized_graphing[2*i+j]
+                    scores_normalized = np.sort(scores_normalized)[::-1]
+                    axs[i,j].plot(scores,'k-',label=f'{prots[2*i+j]} weighted')
+                    axs[i,j].set_yscale('linear')
+                    axs[i,j].set_title(f'Enrichment of {prots[2*i+j]}',fontsize=20)
+                    axs[i,j].set_xlabel('Enrichment rank',fontsize=16)
+                    axs[i,j].set_ylabel('Enrichment score',fontsize=16)
+                    axs[i,j].grid(b=True, which='major', color='dimgray', linestyle='-')
+                    axs[i,j].grid(b=True, which='minor', color='lightgray', linestyle='--')
+                    axs[i,j].tick_params(axis='both', which='major', labelsize=14)
+                    ax2 = axs[i,j].twinx()
+                    ax2.plot(scores_normalized,'r-',label=f'{prots[2*i+j]} normalized')
+                    ax2.set_yscale('log')
+                    ax2.legend(loc='best')
+                except IndexError:
+                    continue
+        plt.tight_layout()
+        figname = os.path.join(png_dir,'Final Enrichments.png')
+        plt.savefig(figname)
+        plt.show()
+
+        fig,axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(14,14),sharey=True)
+        for i in range(math.ceil(len(prots)/2)):
+            for j in range(2):
+                try:
+                    scores = es_graphing[2*i+j]
+                    scores = np.sort(scores)[::-1]
+                    scores_normalized = es_normalized_graphing[2*i+j]
+                    scores_normalized = np.sort(scores_normalized)[::-1]
+                    axs[i,j].plot(scores[0:1000],'k-',label=f'{prots[2*i+j]} weighted')
+                    axs[i,j].set_yscale('linear')
+                    axs[i,j].set_title(f'Enrichment of {prots[2*i+j]}',fontsize=20)
+                    axs[i,j].set_xlabel('Enrichment rank',fontsize=16)
+                    axs[i,j].set_ylabel('Enrichment score',fontsize=16)
+                    axs[i,j].grid(b=True, which='major', color='dimgray', linestyle='-')
+                    axs[i,j].grid(b=True, which='minor', color='lightgray', linestyle='--')
+                    axs[i,j].tick_params(axis='both', which='major', labelsize=14)
+                    ax2 = axs[i,j].twinx()
+                    ax2.plot(scores_normalized[0:1000],'r-',label=f'{prots[2*i+j]} normalized')
+                    ax2.set_yscale('log')
+                    ax2.legend(loc='best')
+                except IndexError:
+                    continue
+        plt.tight_layout()
+        figname = os.path.join(png_dir,'Final Enrichments Zoomed.png')
+        plt.savefig(figname)
+        plt.show()
+
+    else:
+        fig,axs = plt.subplots(1,2,figsize=(14,10),sharey=True)
+        for j in range(2):
+            scores = es_graphing[j]
+            scores = np.sort(scores)[::-1]
+            scores_normalized = es_normalized_graphing[j]
+            scores_normalized = np.sort(scores_normalized)[::-1]
+            axs[j].plot(scores,'k-',label=f'{prots[j]} weighted')
+            axs[j].set_yscale('linear')
+            axs[j].set_title(f'Enrichment of {prots[j]}')
+            axs[j].set_xlabel('Enrichment rank')
+            axs[j].set_ylabel('Enrichment score')
+            axs[j].grid(b=True, which='major', color='dimgray', linestyle='-')
+            axs[j].grid(b=True, which='minor', color='lightgray', linestyle='--')
+            ax2 = axs[j].twinx()
+            ax2.plot(scores_normalized,'r-',label=f'{prots[j]} normalized')
+            ax2.set_yscale('log')
+            ax2.legend(loc='best')
+        plt.tight_layout()
+        figname = os.path.join(png_dir,'Final Enrichments.png')
+        plt.savefig(figname)
+        plt.show()
+
+        fig,axs = plt.subplots(1,2,figsize=(14,10),sharey=True)
+        for j in range(2):
+            scores = es_graphing[j]
+            scores = np.sort(scores)[::-1]
+            scores_normalized = es_normalized_graphing[j]
+            scores_normalized = np.sort(scores_normalized)[::-1]
+            axs[j].plot(scores[0:1000],'k-',label=f'{prots[j]} weighted')
+            axs[j].set_yscale('linear')
+            axs[j].set_title(f'Enrichment of {prots[j]}')
+            axs[j].set_xlabel('Enrichment rank')
+            axs[j].set_ylabel('Enrichment score')
+            axs[j].grid(b=True, which='major', color='dimgray', linestyle='-')
+            axs[j].grid(b=True, which='minor', color='lightgray', linestyle='--')
+            ax2 = axs[j].twinx()
+            ax2.plot(scores_normalized[0:1000],'r-',label=f'{prots[j]} normalized')
+            ax2.set_yscale('log')
+            ax2.legend(loc='best')
+        plt.tight_layout()
+        figname = os.path.join(png_dir,'Final Enrichments Zoomed.png')
+        plt.savefig(figname)
+        plt.show()
+
+def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_nonspecific,ps_unclear,inclusion_lists,feat_mz_combined,enrichmentscores,p_plot,colors,p_score_cutoff,enr_score_cutoff,save_dir):
+    if len(prots) > 2:
+        fig, axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(18,18))
+        for i in range(math.ceil(len(prots)/2)):
+            for j in range(2):
+                try:
+                    e_spec = es_graphing[2*i+j]
+                    e_nonspec = [e_val[2*i+j] for e_val in es_nonspecific]
+                    e_unclear = [e_val[2*i+j] for e_val in es_unclear]
+
+                    p_spec = [-np.log10(p) for p in ps_graphing[2*i+j]]
+                    p_nonspec = [-np.log10(p) for p in ps_nonspecific]
+                    p_unclear = [-np.log10(p) for p in ps_unclear]
+                    axs[i,j].scatter(e_unclear,p_unclear,c='r',label='Unclear')
+                    axs[i,j].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
+                    axs[i,j].scatter(e_spec,p_spec,c='b',label='Specific')   
+                    for color, mz_list in enumerate(inclusion_lists):
+                        for mz in mz_list:
+                            if np.round(mz,2) in np.round(feat_mz_combined,2):
+                                index = np.where(np.round(feat_mz_combined,2) == np.round(mz,2))[0]
+                                for idx in index:
+                                    axs[i,j].scatter(enrichmentscores[2*i+j][idx],p_plot[idx],c=colors[color])
+                    axs[i,j].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
+                    axs[i,j].plot([enr_score_cutoff,enr_score_cutoff],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
+                    axs[i,j].set_xscale('linear')
+                    axs[i,j].set_yscale('linear')
+                    axs[i,j].set_title(f'Volcano plot for {prots[2*i+j]}',fontsize=24)
+                    axs[i,j].set_xlabel('Enrichment Score',fontsize=20)
+                    axs[i,j].set_ylabel('-Log10(P value)',fontsize=20)
+                    axs[i,j].tick_params(axis='both', which='major', labelsize=16)
+                except IndexError:
+                    continue
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        figname = 'Volcano Plots Specific.png'
+        plt.savefig(os.path.join(save_dir,figname))
+        plt.show()          
+    else:
+        fig, axs = plt.subplots(1,2,figsize=(14,10))
+        for i in range(len(prots)):
+            e_spec = es_graphing[i]
+            e_nonspec = [e_val[i] for e_val in es_nonspecific]
+            e_unclear = [e_val[i] for e_val in es_unclear]
+            
+            p_spec = [-np.log10(p) for p in ps_graphing[i]]
+            p_nonspec = [-np.log10(p) for p in ps_nonspecific]
+            p_unclear = [-np.log10(p) for p in ps_unclear]
+            axs[i].scatter(e_unclear,p_unclear,c='r',label='Unclear')
+            axs[i].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
+            axs[i].scatter(e_spec,p_spec,c='b',label='Specific')   
+            for color, mz_list in enumerate(inclusion_lists):
+                for mz in mz_list:
+                    if np.round(mz,2) in np.round(feat_mz_combined,2):
+                        index = np.where(np.round(feat_mz_combined,2) == np.round(mz,2))[0]
+                        for idx in index:
+                            axs[i].scatter(enrichmentscores[i][idx],p_plot[idx],c=colors[color])
+            axs[i].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
+            axs[i].plot([1/len(prots),1/len(prots)],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
+            axs[i].set_xscale('linear')
+            axs[i].set_xlim([0,1])
+            axs[i].set_yscale('linear')
+            axs[i].set_title(f'Volcano plot for {prots[i]}',fontsize=24)
+            axs[i].set_xlabel('Enrichment Score',fontsize=20)
+            axs[i].set_ylabel('-Log10(P value)',fontsize=20)
+            axs[i].legend(loc='best',fontsize=16)
+            axs[i].tick_params(axis='both',which='major', labelsize=16)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        figname = 'Volcano Plots Specific.png'
+        plt.savefig(os.path.join(save_dir,figname))
+        plt.show()
+
+def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspecific,es_normalized_unclear,ps_graphing,ps_nonspecific,ps_unclear,p_score_cutoff,enr_score_cutoff,save_dir):
+    if len(prots) > 2:
+        fig, axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(18,18))
+        for i in range(math.ceil(len(prots)/2)):
+            for j in range(2):
+                try:
+                    e_spec = es_normalized_graphing[2*i+j]
+                    e_nonspec = [e_val[2*i+j] for e_val in es_normalized_nonspecific]
+                    e_unclear = [e_val[2*i+j] for e_val in es_normalized_unclear]
+                    p_spec = [-np.log10(p) for p in ps_graphing[2*i+j]]
+                    p_nonspec = [-np.log10(p) for p in ps_nonspecific]
+                    p_unclear = [-np.log10(p) for p in ps_unclear]
+                    axs[i,j].scatter(e_unclear,p_unclear,c='r',label='Unclear')
+                    axs[i,j].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
+                    axs[i,j].scatter(e_spec,p_spec,c='b',label='Specific')   
+                    axs[i,j].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
+                    axs[i,j].plot([enr_score_cutoff,enr_score_cutoff],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
+                    axs[i,j].set_xscale('log')
+                    axs[i,j].set_yscale('linear')
+                    axs[i,j].set_xlim([1E-4,1E4])
+                    axs[i,j].set_title(f'Volcano plot for {prots[2*i+j]}',fontsize=24)
+                    axs[i,j].set_xlabel('Enrichment Score',fontsize=20)
+                    axs[i,j].set_ylabel('-Log10(P value)',fontsize=20)
+                    axs[i,j].tick_params(axis='both', which='major', labelsize=16)
+                except IndexError:
+                    continue
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        figname = 'Volcano Plots Specific normalized.png'
+        plt.savefig(os.path.join(save_dir,figname))
+        plt.show()          
+    else:
+        fig, axs = plt.subplots(1,2,figsize=(14,10))
+        for i in range(len(prots)):
+            e_spec = es_normalized_graphing[i]
+            e_nonspec = [e_val[i] for e_val in es_normalized_nonspecific]
+            e_unclear = [e_val[i] for e_val in es_normalized_unclear]
+            
+            p_spec = [-np.log10(p) for p in ps_graphing[i]]
+            p_nonspec = [-np.log10(p) for p in ps_nonspecific]
+            p_unclear = [-np.log10(p) for p in ps_unclear]
+            axs[i].scatter(e_unclear,p_unclear,c='r',label='Unclear')
+            axs[i].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
+            axs[i].scatter(e_spec,p_spec,c='b',label='Specific')   
+            axs[i].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
+            axs[i].plot([1,1],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
+            axs[i].set_xscale('log')
+            axs[i].set_yscale('linear')
+            axs[i].set_xlim([1E-4,1E4])
+            axs[i].set_title(f'Volcano plot for {prots[i]}',fontsize=24)
+            axs[i].set_xlabel('Enrichment Score',fontsize=20)
+            axs[i].set_ylabel('-Log10(P value)',fontsize=20)
+            axs[i].legend(loc='best',fontsize=16)
+            axs[i].tick_params(axis='both',which='major', labelsize=16)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        figname = 'Volcano Plots Specific normalized.png'
+        plt.savefig(os.path.join(save_dir,figname))
+        plt.show()
+
+def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,enr_score_cutoff,p_score_cutoff,prots,parent_dir,folder,feat_RT_cf_combined,feat_mz_filtered,feat_z_filtered,pvals,spec_label,areas_savgol,full_out):
+    for i in range(len(enrichmentscores)):
+        df = pd.DataFrame(columns=('Compound', 'm/z','z','p value','specificity'))
+        score = es_graphing[i]
+        RT = RTs_graphing[i]
+        mz = mzs_graphing[i]
+        ps = ps_graphing[i]
+        zs = z_graphing[i]
+        score_sorted = np.sort(score)[::-1]            # sort the scores by descending order
+        indices_sorted = np.argsort(score)[::-1]        # get indices of scores to get retention time and m/z
+        count = 0
+        while score_sorted[count] >= enr_score_cutoff:# and len(df) < 10000:
+            index = indices_sorted[count]
+            if ps[index] < p_score_cutoff:
+                A = 'EScore: ' + str(np.round(score_sorted[count],2)) + ' RTime: ' + str(np.round(RT[index],3))
+                B = np.round(mz[index],4)
+                D = zs[index]
+                C = float(ps[index])
+                E = prots[i]
+                df.loc[count] = [A,B,D,C,E]
+            count -= -1
+            if count >= len(score):
+                break
+        df.to_csv(os.path.join(parent_dir,folder,prots[i] + '.csv'),index=False)
+            
+    if full_out:
+        for i in range(len(enrichmentscores)):
+            df = pd.DataFrame(columns=('Compound', 'm/z','z','p value','specificity','areas'))
+            score = enrichmentscores[i]
+            score_sorted = np.sort(score)[::-1]            # sort the scores by descending order
+            indices_sorted = np.argsort(score)[::-1]        # get indices of scores to get retention time and m/z
+            for j in range(len(score_sorted)):
+                index = indices_sorted[j]
+                A = 'EScore: ' + str(np.round(score_sorted[j],2)) + ' RTime: ' + str(np.round(feat_RT_cf_combined[index],3))
+                B = np.round(feat_mz_filtered[index],4)
+                D = feat_z_filtered[index]
+                C = float(pvals[index])
+                E = spec_label[index]
+                F = [float(entry) for entry in areas_savgol[index]]
+                df.loc[j] = [A,B,D,C,E,F]
+            df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Full Output.csv'),index=False)
+
+def inclusion_lists(data_dir,files_full,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,png_dir,prots,es_graphing,peps_sec,parent_dir,folder,feat_RT_cf_combined):
+    get_RTs = MSExperiment()
+    file_path = os.path.join(data_dir,files_full[0])
+    MzMLFile().load(file_path,get_RTs)
+
+    RT_start = get_RTs[0].getRT()
+    RT_end = get_RTs[get_RTs.getNrSpectra()-1].getRT()
+    n_bins = int(np.ceil(RT_end-RT_start))
+    del get_RTs
+
+    for i,RT_prot in enumerate(RTs_graphing):
+        mzs = mzs_graphing[i]
+        ps = ps_graphing[i]
+        zs = z_graphing[i]
+        plt.rcParams["figure.figsize"] = 10,5
+        hist,bins = np.histogram(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+        plt.hist(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+        plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
+        plt.savefig(os.path.join(png_dir,prots[i]+' specific features histogram.png'))   # bins too thin to see in output lmao
+        plt.show()
+        plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
+        
+        fig,axs = plt.subplots(1,2,figsize=(14,14))
+        score = es_graphing[i]
+        bin_members = np.digitize(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins))
+        unique_members = np.unique(bin_members)
+        new_score_array = []  
+        for member in unique_members:
+            repeats = np.where(bin_members == member)[0]
+            scores_sub = [score[v] for v in repeats]
+            if len(repeats) > peps_sec:
+                scores_sub_sorted = np.sort(scores_sub)   # sort from lowest to highest
+                while len(scores_sub) > peps_sec:
+                    scores_sub = np.delete(scores_sub,np.where(scores_sub==scores_sub_sorted[0])[0][0])
+                    scores_sub_sorted = np.delete(scores_sub_sorted,0)
+            new_score_array = np.append(new_score_array,scores_sub)
+        new_RT_array = [RT_prot[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+        new_mz_array = [mzs[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+        new_z_array = [zs[np.where(score==score_red)[0][0]] for score_red in new_score_array] 
+        new_p_array = [ps[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+        axs[0].plot(score,RT_prot,'k.',markersize=10,label='Features removed')
+        axs[0].plot(new_score_array,new_RT_array,'y.',label='Features remaining')
+        axs[0].legend(loc='best')
+        axs[1].scatter(score,[-np.log10(p) for p in ps],label='Original features',linewidths=6)
+        axs[1].scatter(new_score_array,[-np.log10(p) for p in new_p_array],label='Features remaining')
+        axs[1].set_xlabel('Enrichment Score',fontsize=20)
+        axs[1].set_ylabel('-Log10(P value)',fontsize=20)
+        plt.savefig(os.path.join(png_dir,prots[i] + ' specific features removed plot.png'))
+        plt.show()
+        
+        df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z'))
+        for j in range(len(new_score_array)):
+            A = 'EScore: ' + str(np.round(new_score_array[j],2)) + ' p value: ' + "{:.3e}".format(new_p_array[j][0]) + ' RTime: ' + str(np.round(new_RT_array[j],3))
+            B = None
+            C = '(no adduct)'
+            D = np.round(new_mz_array[j],4)
+            E = int(new_z_array[j])
+            df.loc[j] = [A,B,C,D,E]
+        df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Inclusion List.csv'),index=False)
+        
+    plt.rcParams["figure.figsize"] = 10,5
+    hist = np.histogram(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+    plt.hist(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+    plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
+    plt.savefig(os.path.join(png_dir,'Consensus Map Histogram.png'))
+    plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
+    plt.show()
+
+def compare_known_binders(known_binders,prots,parent_dir,folder,feat_mz_combined_filtered,feat_mz_combined,feat_RT_cf_combined):
+    if known_binders:
+        known_mzs_found = {}
+        known_rts_found = {}
+        known_mzs_notfound = {}
+        known_rts_notfound = {}
+        for i in range(len(prots)):
+            known_mzs_prot_found = []
+            known_rts_prot_found = []
+            known_mzs_prot_notfound = []
+            known_rts_prot_notfound = []
+            is_feature_in = 0
+            df_compare1 = pd.DataFrame(columns = ('mz','rt range low','rt range high','rt ave','rt ave sec','z','Area Intensity'))
+            df_compare2 = pd.DataFrame(columns = ('mz','rt range low','rt range high','rt ave','rt ave sec','z','Area Intensity'))
+            with open(os.path.join(parent_dir,'FeatureList'+prots[i]+'.csv'),mode='r',encoding='utf-8-sig') as csv_file:
+                csv_reader = csv.DictReader(csv_file,delimiter=',')
+                j = 0
+                k = 0
+                for row in csv_reader:
+                    if np.round(float(row['mz']),2) in np.round(feat_mz_combined_filtered,2):
+                        known_mzs_prot_found.append(float(row['mz']))
+                        known_rts_prot_found.append(float(row['rt ave sec']))
+                        idx = np.where(np.round(feat_mz_combined,2) == np.round(float(row['mz']),2))[0]
+                        rt_list = [feat_RT_cf_combined[i] for i in idx]
+                        df_compare1.loc[j] = row
+                        is_feature_in -= -1
+                    else:
+                        known_mzs_prot_notfound.append(float(row['mz']))
+                        known_rts_prot_notfound.append(float(row['rt ave sec']))
+                        df_compare2.loc[k] = row
+                        k -= -1
+                    j -= -1
+                percent_feat_ID = is_feature_in/j*100
+            known_mzs_found[i] = known_mzs_prot_found
+            known_rts_found[i] = known_rts_prot_found
+            known_mzs_notfound[i] = known_mzs_prot_notfound
+            known_rts_notfound[i] = known_rts_prot_notfound
+            df_compare1.to_csv(os.path.join(parent_dir,folder,prots[i] + ', no time req ' + str(np.round(percent_feat_ID,2)) + '% new list features found, cf total = ' + str(len(feat_mz_combined)) + '.csv'))
+            df_compare2.to_csv(os.path.join(parent_dir,folder,prots[i] + ', no time req ' + str(np.round(100-percent_feat_ID,2)) + '% new list features not found.csv'))
 
 def plot_PRTC(m_z_list,feature_RT,RT_orig_list,areas,directory,savedir,weight=True,show_plot=False,time=5,peak_range=30,decimal=2,reps=3,baseline=0):
     RTs_full = []
