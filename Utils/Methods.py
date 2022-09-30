@@ -328,7 +328,7 @@ def alignment_check(consensus_map,feature_maps,png_dir,new_map_RTs,files,origina
     for i,RT_map in enumerate(fixed_RT_maps):
         plt.plot(RT_map,consensus_mzs_aligned,'k.',label='aligned feature RTs')
         plt.plot([f.getRT() for f in feature_maps[i]],[f.getMZ() for f in feature_maps[i]],'y.',label='original feature RTs')
-        plt.xlim([0,5500])
+        plt.xlim([0,max(RT_map)])
         plt.ylim([200,900])
         plt.savefig(os.path.join(png_dir,'Alignment Check Should Not Overlap ' + files[i] + '.png'))
         plt.show()
@@ -337,6 +337,8 @@ def alignment_check(consensus_map,feature_maps,png_dir,new_map_RTs,files,origina
     for i in range(len(new_map_RTs)):
         feat_RTs = [RT[i] for RT in fixed_RT_maps]
         fixed_RT_maps_formatted.append(feat_RTs)
+        
+    return fixed_RT_maps_formatted
 
 def PRTC_stats(areas_ref_full,files,ref_feature_mass,png_dir):
     for i,areas in enumerate(areas_ref_full):
@@ -464,7 +466,8 @@ def get_data(directory):
             mzs.append(mzs_full)         
     return mzs,RTs,ints
 
-def feature_int_extractor(m_z_feature_list,RT_feature_list,RTs_orig_list,mzs,RTs,ints,LOD=1.5E4,noise_level=150,peak_range=120,decimal=2,percent=1,subtract=False):
+def feature_int_extractor(m_z_feature_list,RT_feature_list,RTs_orig_list,mzs,RTs,ints,LOD=1.5E4,
+                          noise_level=150,peak_range=120,decimal=2,percent=1,subtract=False):
     ints_windows = []
     rt_windows = []
     backs = []
@@ -512,7 +515,8 @@ def feature_int_extractor(m_z_feature_list,RT_feature_list,RTs_orig_list,mzs,RTs
 
     return max_int_features,rt_windows,ints_windows,backs 
 
-def feature_int_extractor_start(m_z_feature_list,RT_feature_list,mzs,RTs,ints,LOD=1.5E4,noise_level=150,peak_range=120,decimal=2,percent=1,subtract=False):
+def feature_int_extractor_start(m_z_feature_list,RT_feature_list,mzs,RTs,ints,LOD=1.5E4,
+                                noise_level=150,peak_range=120,decimal=2,percent=1,subtract=False):
     ints_windows = []
     rt_windows = []
     backs = []
@@ -557,7 +561,8 @@ def feature_int_extractor_start(m_z_feature_list,RT_feature_list,mzs,RTs,ints,LO
 
     return max_int_features,rt_windows,ints_windows,backs 
 
-def peak_finder_savgol(rt_windows,ints_windows,names,plot=False,reps=3,default_thresh=1.5E5,kernal_size=10,width=5,prominence=2,threshold=2,rel_height=0.5):
+def peak_finder_savgol(rt_windows,ints_windows,names,plot=False,reps=3,default_thresh=1.5E5,
+                       kernal_size=10,width=5,prominence=2,threshold=2,rel_height=0.5):
     all_peaks = []
     for i,feature in enumerate(ints_windows):  # each entry in ints_windows is a feature
         feature_peaks = []
@@ -598,7 +603,8 @@ def peak_finder_savgol(rt_windows,ints_windows,names,plot=False,reps=3,default_t
             print(i)
     return all_peaks
 
-def feature_area_extractor_savgol(rt_windows_filt,int_windows_filt,check=False,width_start=5,prominence=2,threshold=2,rel_height=0.5):
+def feature_area_extractor_savgol(rt_windows_filt,int_windows_filt,check=False,
+                                  width_start=5,prominence=2,threshold=2,rel_height=0.5):
     all_areas = []
     for i,feature in enumerate(int_windows_filt):  # each entry in ints_windows is a feature
         feature_areas = []
@@ -660,6 +666,7 @@ def feature_area_extractor_savgol(rt_windows_filt,int_windows_filt,check=False,w
     return all_areas
 
 def enr_scoring(max_int_features,ref_val,prot_names,prots,reps=3,p_score_cutoff=0.05):
+    # redundancy in prot_name and prots?
     int_sums = []
     spec_label = []
     specificity = []
@@ -744,7 +751,8 @@ def enr_scoring(max_int_features,ref_val,prot_names,prots,reps=3,p_score_cutoff=
         enr_scores_normalized.append(e_prot_normalized)
     return np.asarray(enr_scores),np.asarray(enr_scores_normalized),p_vals,specificity,spec_label
 
-def setup_output(prots,spec_label,enrichmentscores,enrichment_normalized,pvals,feat_RT_filtered,feat_RT_orig_filtered,feat_mz_filtered,feat_z_filtered,areas_savgol):
+def setup_output(prots,spec_label,enrichmentscores,enrichment_normalized,pvals,
+                 feat_RT_filtered,feat_RT_orig_filtered,feat_mz_filtered,feat_z_filtered,areas_savgol):
     es_graphing = [ [] for _ in range(len(prots))]
     es_normalized_graphing = [ [] for _ in range(len(prots))]
     ps_graphing = [ [] for _ in range(len(prots))]
@@ -906,7 +914,8 @@ def enrichment_rankings(prots,es_graphing,es_normalized_graphing,png_dir):
         plt.savefig(figname)
         plt.show()
 
-def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_nonspecific,ps_unclear,inclusion_lists,feat_mz_combined,enrichmentscores,p_plot,colors,p_score_cutoff,enr_score_cutoff,save_dir):
+def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_nonspecific,ps_unclear,
+                     feat_mz_combined,enrichmentscores,p_score_cutoff,enr_score_cutoff,save_dir):
     if len(prots) > 2:
         fig, axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(18,18))
         for i in range(math.ceil(len(prots)/2)):
@@ -922,12 +931,6 @@ def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_
                     axs[i,j].scatter(e_unclear,p_unclear,c='r',label='Unclear')
                     axs[i,j].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
                     axs[i,j].scatter(e_spec,p_spec,c='b',label='Specific')   
-                    for color, mz_list in enumerate(inclusion_lists):
-                        for mz in mz_list:
-                            if np.round(mz,2) in np.round(feat_mz_combined,2):
-                                index = np.where(np.round(feat_mz_combined,2) == np.round(mz,2))[0]
-                                for idx in index:
-                                    axs[i,j].scatter(enrichmentscores[2*i+j][idx],p_plot[idx],c=colors[color])
                     axs[i,j].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
                     axs[i,j].plot([enr_score_cutoff,enr_score_cutoff],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
                     axs[i,j].set_xscale('linear')
@@ -955,12 +958,6 @@ def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_
             axs[i].scatter(e_unclear,p_unclear,c='r',label='Unclear')
             axs[i].scatter(e_nonspec,p_nonspec,c='gray',label='Nonspecific')
             axs[i].scatter(e_spec,p_spec,c='b',label='Specific')   
-            for color, mz_list in enumerate(inclusion_lists):
-                for mz in mz_list:
-                    if np.round(mz,2) in np.round(feat_mz_combined,2):
-                        index = np.where(np.round(feat_mz_combined,2) == np.round(mz,2))[0]
-                        for idx in index:
-                            axs[i].scatter(enrichmentscores[i][idx],p_plot[idx],c=colors[color])
             axs[i].plot([min(e_spec + e_nonspec + e_unclear),max(e_spec + e_nonspec + e_unclear)],[-np.log10(p_score_cutoff),-np.log10(p_score_cutoff)],'k--')
             axs[i].plot([1/len(prots),1/len(prots)],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
             axs[i].set_xscale('linear')
@@ -976,7 +973,8 @@ def volcano_plotting(prots,es_graphing,es_nonspecific,es_unclear,ps_graphing,ps_
         plt.savefig(os.path.join(save_dir,figname))
         plt.show()
 
-def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspecific,es_normalized_unclear,ps_graphing,ps_nonspecific,ps_unclear,p_score_cutoff,enr_score_cutoff,save_dir):
+def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspecific,es_normalized_unclear,
+                             ps_graphing,ps_nonspecific,ps_unclear,p_score_cutoff,enr_score_cutoff,save_dir):
     if len(prots) > 2:
         fig, axs = plt.subplots(math.ceil(len(prots)/2),2,figsize=(18,18))
         for i in range(math.ceil(len(prots)/2)):
@@ -995,7 +993,7 @@ def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspeci
                     axs[i,j].plot([enr_score_cutoff,enr_score_cutoff],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
                     axs[i,j].set_xscale('log')
                     axs[i,j].set_yscale('linear')
-                    axs[i,j].set_xlim([1E-4,1E4])
+                    axs[i,j].set_xlim([min(e_spec),max(e_spec)])
                     axs[i,j].set_title(f'Volcano plot for {prots[2*i+j]}',fontsize=24)
                     axs[i,j].set_xlabel('Enrichment Score',fontsize=20)
                     axs[i,j].set_ylabel('-Log10(P value)',fontsize=20)
@@ -1034,7 +1032,8 @@ def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspeci
         plt.savefig(os.path.join(save_dir,figname))
         plt.show()
 
-def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,enr_score_cutoff,p_score_cutoff,prots,parent_dir,folder,feat_RT_cf_combined,feat_mz_filtered,feat_z_filtered,pvals,spec_label,areas_savgol,full_out):
+def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,enr_score_cutoff,p_score_cutoff,
+                   prots,parent_dir,folder,feat_RT_cf_combined,feat_mz_filtered,feat_z_filtered,pvals,spec_label,areas_savgol,full_out):
     for i in range(len(enrichmentscores)):
         df = pd.DataFrame(columns=('Compound', 'm/z','z','p value','specificity'))
         score = es_graphing[i]
@@ -1076,7 +1075,8 @@ def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_gra
                 df.loc[j] = [A,B,D,C,E,F]
             df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Full Output.csv'),index=False)
 
-def inclusion_lists(data_dir,files_full,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,png_dir,prots,es_graphing,peps_sec,parent_dir,folder,feat_RT_cf_combined):
+def inclusion_lists(data_dir,files_full,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,
+                    png_dir,prots,es_graphing,peps_sec,parent_dir,folder,feat_RT_cf_combined):
     get_RTs = MSExperiment()
     file_path = os.path.join(data_dir,files_full[0])
     MzMLFile().load(file_path,get_RTs)
@@ -1184,7 +1184,8 @@ def compare_known_binders(known_binders,prots,parent_dir,folder,feat_mz_combined
             df_compare1.to_csv(os.path.join(parent_dir,folder,prots[i] + ', no time req ' + str(np.round(percent_feat_ID,2)) + '% new list features found, cf total = ' + str(len(feat_mz_combined)) + '.csv'))
             df_compare2.to_csv(os.path.join(parent_dir,folder,prots[i] + ', no time req ' + str(np.round(100-percent_feat_ID,2)) + '% new list features not found.csv'))
 
-def plot_PRTC(m_z_list,feature_RT,RT_orig_list,areas,directory,savedir,weight=True,show_plot=False,time=5,peak_range=30,decimal=2,reps=3,baseline=0):
+def plot_PRTC(m_z_list,feature_RT,RT_orig_list,areas,directory,savedir,weight=True,
+              show_plot=False,time=5,peak_range=30,decimal=2,reps=3,baseline=0):
     RTs_full = []
     ints_full = []
     mzs_full = []
@@ -1281,7 +1282,8 @@ def plot_PRTC(m_z_list,feature_RT,RT_orig_list,areas,directory,savedir,weight=Tr
         else:
             plt.close()
 
-def plot_EIC(m_z_list,feature_RT,RT_orig_list,score_list,p_scores,areas,directory,savedir,weight=True,show_plot=False,time=5,peak_range=30,decimal=2,reps=3,baseline=0):
+def plot_EIC(m_z_list,feature_RT,RT_orig_list,score_list,p_scores,areas,directory,savedir,
+             weight=True,show_plot=False,time=5,peak_range=30,decimal=2,reps=3,baseline=0):
     RTs_full = []
     ints_full = []
     mzs_full = []
