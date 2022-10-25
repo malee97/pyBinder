@@ -26,6 +26,7 @@ from scipy.ndimage import gaussian_filter1d
 import scikit_posthocs as sp
 from itertools import combinations
 import warnings
+import xlsxwriter
 import peakutils
 
 def sys_checks(parent_dir,prots,centroided,enr_score_cutoff,p_score_cutoff,peak_RT,peps_sec,reps,nr_EICs,LOD,mzML):
@@ -241,7 +242,7 @@ def data_visualization(check_data,data_dir,png_dir,parent_dir):
             if file.endswith('mzML'):
                 exp_2D = MSExperiment()
                 MzMLFile().load(os.path.join(data_dir,file),exp_2D)
-                plot_spectra_2D_overview(exp_2D,file[:-5],'centroided')
+                plot_spectra_2D_overview(exp_2D,file[:-5],'centroided',png_dir)
                 
     '''profile'''
     if check_data:
@@ -249,7 +250,7 @@ def data_visualization(check_data,data_dir,png_dir,parent_dir):
             if file.endswith('mzML'):
                 exp_2D = MSExperiment()
                 MzMLFile().load(os.path.join(data_dir,file),exp_2D)
-                plot_spectra_2D_overview(exp_2D,file[:-5],'profile')
+                plot_spectra_2D_overview(exp_2D,file[:-5],'profile',png_dir)
 
 
 def plot_spectra_2D_overview(exp,title,other,png_dir):
@@ -1032,6 +1033,8 @@ def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspeci
         plt.savefig(os.path.join(save_dir,figname))
         plt.show()
 
+############ Changed ####################
+        
 def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,enr_score_cutoff,p_score_cutoff,
                    prots,parent_dir,folder,feat_RT_cf_combined,feat_mz_filtered,feat_z_filtered,pvals,spec_label,areas_savgol,full_out):
     for i in range(len(enrichmentscores)):
@@ -1047,7 +1050,7 @@ def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_gra
         while score_sorted[count] >= enr_score_cutoff:# and len(df) < 10000:
             index = indices_sorted[count]
             if ps[index] < p_score_cutoff:
-                A = 'EScore: ' + str(np.round(score_sorted[count],2)) + ' RTime: ' + str(np.round(RT[index],3))
+                A = f'EScore: {np.round(score_sorted[count],2)} RTime: {np.round(RT[index],3)} Areas: {[float(entry) for entry in areas_savgol[index]]}'
                 B = np.round(mz[index],4)
                 D = zs[index]
                 C = float(ps[index])
@@ -1059,14 +1062,14 @@ def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_gra
         df.to_csv(os.path.join(parent_dir,folder,prots[i] + '.csv'),index=False)
             
     if full_out:
-        for i in range(len(enrichmentscores)):
+        for i,score in enumerate(enrichmentscores):
             df = pd.DataFrame(columns=('Compound', 'm/z','z','p value','specificity','areas'))
             score = enrichmentscores[i]
             score_sorted = np.sort(score)[::-1]            # sort the scores by descending order
             indices_sorted = np.argsort(score)[::-1]        # get indices of scores to get retention time and m/z
-            for j in range(len(score_sorted)):
+            for j,score_sort in enumerate(score_sorted):
                 index = indices_sorted[j]
-                A = 'EScore: ' + str(np.round(score_sorted[j],2)) + ' RTime: ' + str(np.round(feat_RT_cf_combined[index],3))
+                A = f'EScore: {np.round(score_sort,2)} RTime: {np.round(feat_RT_cf_combined[index],3)}'
                 B = np.round(feat_mz_filtered[index],4)
                 D = feat_z_filtered[index]
                 C = float(pvals[index])
@@ -1074,75 +1077,397 @@ def export_results(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_gra
                 F = [float(entry) for entry in areas_savgol[index]]
                 df.loc[j] = [A,B,D,C,E,F]
             df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Full Output.csv'),index=False)
+            
+def inclusion_lists(parent_dir,save_dir,png_dir,folder,prots,gradient_time,peps_min,RT_start=3):
+    ''' 
+    Adapted from Inclusion List Generator script, hence the need for importing files that were 
+    just generated from the previous functions - will rectify soon
+    '''
+    for i,prot in enumerate(prots):
+        file = os.path.join(parent_dir,folder,prot + '.csv')
+        file_full = os.path.join(parent_dir,folder,prot + ' Full Output.csv')
+                                 
+        data = []
+        with open(file, 'r') as data_file:
+            csv_reader = csv.DictReader(data_file,delimiter=',')
+            for row in csv_reader:
+                data.append(row)
+        RTs = []
+        Escores = []
+        mzs = []
+        ps = []
+        zs = []
+        specs = []
+        for line in data:
+            idx = line['Compound'].find('RTime:')
+            idx2 = line['Compound'].find('Areas:')
+            Escores.append(float(line['Compound'][8:idx-1]))
+            RTs.append(float(line['Compound'][idx+7:idx2-1])/60)   # convert to mins
+            mzs.append(float(line['m/z']))
+            zs.append(float(line['z']))
+            ps.append(float(line['p value']))
+            specs.append(line['specificity'])
 
-def inclusion_lists(data_dir,files_full,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,
-                    png_dir,prots,es_graphing,peps_sec,parent_dir,folder,feat_RT_cf_combined):
-    get_RTs = MSExperiment()
-    file_path = os.path.join(data_dir,files_full[0])
-    MzMLFile().load(file_path,get_RTs)
+        RT_ranges = [(max(3,RT - 10),min(RT+10,gradient_time)) for RT in RTs]   # method is 120 mins, MS on at 3 mins
+                                 
+        dataframe = pd.DataFrame([Escores,RTs,mzs,zs,ps,specs]).transpose()
+        dataframe.columns = ['Escore','RT','mz','z','p','spec']
+        bins = 120
 
-    RT_start = get_RTs[0].getRT()
-    RT_end = get_RTs[get_RTs.getNrSpectra()-1].getRT()
-    n_bins = int(np.ceil(RT_end-RT_start))
-    del get_RTs
-
-    for i,RT_prot in enumerate(RTs_graphing):
-        mzs = mzs_graphing[i]
-        ps = ps_graphing[i]
-        zs = z_graphing[i]
-        plt.rcParams["figure.figsize"] = 10,5
-        hist,bins = np.histogram(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
-        plt.hist(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
-        plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
-        plt.savefig(os.path.join(png_dir,prots[i]+' specific features histogram.png'))   # bins too thin to see in output lmao
+        fig,axs = plt.subplots(1,2)
+        axs[0].hist(RTs,bins=bins)
+        axs[1].hist(Escores,bins=100)
+        plt.savefig(os.path.join(png_dir,f'{prot} Inclusion List Histograms Start.png'))
         plt.show()
-        plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
         
-        fig,axs = plt.subplots(1,2,figsize=(14,14))
-        score = es_graphing[i]
-        bin_members = np.digitize(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins))
+        n_bins = gradient_time - RT_start + 1
+        hist,bins = np.histogram(RTs,bins=np.linspace(RT_start,gradient_time,n_bins),density=False)
+
+        bin_members = np.digitize(RTs,bins=np.linspace(RT_start,gradient_time,n_bins))
         unique_members = np.unique(bin_members)
-        new_score_array = []  
+        idxs_filtered = []
         for member in unique_members:
             repeats = np.where(bin_members == member)[0]
-            scores_sub = [score[v] for v in repeats]
-            if len(repeats) > peps_sec:
+            idxs = repeats.copy()
+            scores_sub = [Escores[v] for v in repeats]
+            if len(repeats) > peps_min:
                 scores_sub_sorted = np.sort(scores_sub)   # sort from lowest to highest
-                while len(scores_sub) > peps_sec:
-                    scores_sub = np.delete(scores_sub,np.where(scores_sub==scores_sub_sorted[0])[0][0])
+                while len(scores_sub) > peps_min:
+                    delete = np.where(scores_sub == scores_sub_sorted[0])[0][0]
+                    scores_sub = np.delete(scores_sub,delete)
+                    idxs = np.delete(idxs,delete)
                     scores_sub_sorted = np.delete(scores_sub_sorted,0)
-            new_score_array = np.append(new_score_array,scores_sub)
-        new_RT_array = [RT_prot[np.where(score==score_red)[0][0]] for score_red in new_score_array]
-        new_mz_array = [mzs[np.where(score==score_red)[0][0]] for score_red in new_score_array]
-        new_z_array = [zs[np.where(score==score_red)[0][0]] for score_red in new_score_array] 
-        new_p_array = [ps[np.where(score==score_red)[0][0]] for score_red in new_score_array]
-        axs[0].plot(score,RT_prot,'k.',markersize=10,label='Features removed')
-        axs[0].plot(new_score_array,new_RT_array,'y.',label='Features remaining')
-        axs[0].legend(loc='best')
-        axs[1].scatter(score,[-np.log10(p) for p in ps],label='Original features',linewidths=6)
-        axs[1].scatter(new_score_array,[-np.log10(p) for p in new_p_array],label='Features remaining')
-        axs[1].set_xlabel('Enrichment Score',fontsize=20)
-        axs[1].set_ylabel('-Log10(P value)',fontsize=20)
-        plt.savefig(os.path.join(png_dir,prots[i] + ' specific features removed plot.png'))
+            idxs_filtered.append(idxs)
+                                 
+        idxs_flattened = [val for sublist in idxs_filtered for val in sublist]
+        RTs_filtered = [RTs[i] for i in idxs_flattened]
+        Escores_filtered = [Escores[i] for i in idxs_flattened]
+        mzs_filtered = [mzs[i] for i in idxs_flattened]
+        zs_filtered = [zs[i] for i in idxs_flattened]
+        ps_filtered = [ps[i] for i in idxs_flattened]
+        t_starts = [RT - 10 for RT in RTs_filtered]
+        t_ends = [RT + 10 for RT in RTs_filtered]                  
+                                 
+        fig, axs = plt.subplots(1,1,figsize=(16,16))
+        RT_ranges_filtered = [(max(3,RT - 10),min(RT+10,120)) for RT in RTs_filtered]   # method is 120 mins, MS on at 3 mins
+        for i,pair in enumerate(RT_ranges_filtered):
+            axs.plot([pair[0],pair[1]],[mzs_filtered[i],mzs_filtered[i]])
+            axs.scatter(RTs_filtered[i],mzs_filtered[i], s=12)
+            axs.grid()
+        plt.savefig(os.path.join(png_dir,f'{prot} Filtered Inclusion List.png'))
         plt.show()
-        
-        df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z'))
-        for j in range(len(new_score_array)):
-            A = 'EScore: ' + str(np.round(new_score_array[j],2)) + ' p value: ' + "{:.3e}".format(new_p_array[j][0]) + ' RTime: ' + str(np.round(new_RT_array[j],3))
+                                 
+        bins = 120
+        fig,axs = plt.subplots(1,2,figsize=(12,12))
+        axs[0].hist(RTs_filtered,bins=bins)
+        axs[1].hist(Escores_filtered,bins=100)
+        plt.savefig(os.path.join(png_dir,f'{prot} Filtered Inclusion List Histogram.png'))
+                                 
+        df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z','t start (min)','t stop (min)'))
+        for j,score in enumerate(Escores_filtered):
+            A = f'EScore: {np.round(score,2)} p value: {"{:.3e}".format(ps_filtered[j])} RTime: {np.round(RTs_filtered[j],3)}'
             B = None
             C = '(no adduct)'
-            D = np.round(new_mz_array[j],4)
-            E = int(new_z_array[j])
-            df.loc[j] = [A,B,C,D,E]
-        df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Inclusion List.csv'),index=False)
+            D = np.round(mzs_filtered[j],4)
+            E = int(zs_filtered[j])
+            F = max(3,int(RTs_filtered[j] - 10))
+            G = min(int(RTs_filtered[j] + 10),gradient_time)
+            df.loc[j] = [A,B,C,D,E,F,G]
+        df.to_csv(os.path.join(save_dir,f'{prot} Inclusion List Filtered.csv'),index=False)
+                                 
+        df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z','t start (min)','t stop (min)'))
+        for j,score in enumerate(Escores):
+            A = 'EScore: ' + str(np.round(score,2)) + ' p value: ' + "{:.3e}".format(ps[j]) + ' RTime: ' + str(np.round(RTs[j],3))
+            B = None
+            C = '(no adduct)'
+            D = np.round(mzs[j],4)
+            E = int(zs[j])
+            F = max(3,int(RTs[j] - 10))
+            G = min(int(RTs[j] + 10),gradient_time)
+            df.loc[j] = [A,B,C,D,E,F,G]
+        df.to_csv(os.path.join(save_dir,f'{prot} Inlcusion List Not Filtered.csv'),index=False)
         
-    plt.rcParams["figure.figsize"] = 10,5
-    hist = np.histogram(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
-    plt.hist(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
-    plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
-    plt.savefig(os.path.join(png_dir,'Consensus Map Histogram.png'))
-    plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
-    plt.show()
+def inclusion_areascorefiltered(es_graphing,RTs_graphing,RTs_graphing_orig,mzs_graphing,ps_graphing,z_graphing,areas_graphing,
+                                enr_score_cutoff,p_score_cutoff,prots,parent_dir,folder,
+                                n_reps,area_limit,min_escore_quality,gradient_time):
+    ''' This one is done using the working variables in pyBinder, since the Area list from Inclusion List Generator
+        wasn't working properly. Hopefully this one works 
+    '''
+                                 
+    for i,score in enumerate(es_graphing):
+        df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z','t start (min)','t stop (min)'))
+        score_sorted = np.sort(score)[::-1]            # sort the scores by descending order
+        indices_sorted = np.argsort(score)[::-1]        # get indices of scores to get retention time and m/z
+        for j,score_sort in enumerate(score_sorted):
+            index = indices_sorted[j]
+            time = RTs_graphing[i][index]/60
+            area_prot = areas_graphing[i][index]
+            ave_area = np.average(area_prot[n_reps*i:n_reps*i+n_reps])
+            if ave_area > area_limit and score_sort > min_escore_quality:
+                A = f'EScore: {np.round(score_sort,2)} RTime: {np.round(time,3)} Area: {ave_area} All areas: {area_prot} p-value: {ps_graphing[i][index][0]} original RTs: {RTs_graphing_orig[i][index]}'
+                B = None
+                C = '(no adduct)'
+                D = np.round(mzs_graphing[i][index],4)
+                E = z_graphing[i][index]
+                F = max(3,int(time - 10))
+                G = min(int(time + 10),gradient_time)
+                df.loc[j] = [A,B,C,D,E,F,G]
+        df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Inclusion List Area Filtered.csv'),index=False)
+            
+# def inclusion_areascorefiltered(enrichmentscores,es_graphing,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,
+#                         enr_score_cutoff,p_score_cutoff,prots,parent_dir,folder,feat_RT_cf_combined,feat_mz_filtered,
+#                         feat_z_filtered,pvals,spec_label,areas_savgol,full_out,reps,area_limit,min_escore_quality,gradient_time):
+#     ''' This one is done using the working variables in pyBinder, since the Area list from Inclusion List Generator
+#         wasn't working properly. Hopefully this one works 
+#     '''
+                                 
+#     for i,score in enumerate(enrichmentscores):
+#         df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z','t start (min)','t stop (min)'))
+#         score_sorted = np.sort(score)[::-1]            # sort the scores by descending order
+#         indices_sorted = np.argsort(score)[::-1]        # get indices of scores to get retention time and m/z
+#         for j,score_sort in enumerate(score_sorted):
+#             index = indices_sorted[j]
+#             area_prot = areas_savgol[index]
+#             ave_area = np.average(area_prot[reps*i:reps*i+reps])
+#             if ave_area > area_limit and score_sort > min_escore_quality:
+#                 A = f'EScore: {np.round(score_sort,2)} RTime: {np.round(feat_RT_cf_combined[index],3)} Area: {ave_area} All areas: {area_prot}'
+#                 B = None
+#                 C = '(no adduct)'
+#                 D = np.round(feat_mz_filtered[index],4)
+#                 E = feat_z_filtered[index]
+#                 F = max(0,int(feat_RT_cf_combined[index] - 10))
+#                 G = min(int(feat_RT_cf_combined[index] + 10),gradient_time)
+#                 df.loc[j] = [A,B,C,D,E,F,G]
+#         df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Inclusion List Area Filtered.csv'),index=False)
+        
+def inclusion_areascorefiltered_excel(parent_dir,folder,prots,num = 100):
+    ''' 
+    Pulled from Joe, also opens up the previously made inclusion list file and analyzes that
+    '''
+    savedir = os.path.join(parent_dir,folder,"EICs Excel")
+    smallsavedir = os.path.join(savedir,"Small")
+    if not os.path.exists(savedir):
+        os.mkdir(savedir)
+    if not os.path.exists(smallsavedir):
+        os.makedirs(smallsavedir)
+    all_files = []
+    for file in sorted(os.listdir(parent_dir)):
+        if file.endswith('.mzML'):
+            all_files.append(file)
+    RTs_full = []
+    ints_full = []
+    mzs_full = []
+    names = []
+    for file in all_files:
+        if file.endswith('.mzML'):
+            print(file)
+            names.append(file[:-5])
+            exp = MSExperiment()
+            MzMLFile().load(os.path.join(parent_dir,file),exp)
+            RT_list_rep = []
+            int_list_rep = []
+            RTs = []
+            mzs = []
+            ints = []
+            for spec in exp:
+                RTs.append(spec.getRT())
+                mzs_scan, ints_scan = spec.get_peaks()  
+                mzs.append(mzs_scan)
+                ints.append(ints_scan)
+            RTs_full.append(RTs)
+            ints_full.append(ints)
+            mzs_full.append(mzs)  
+    for i,prot in enumerate(prots):
+        print(f'Working on {prot}')
+        data_list = os.path.join(parent_dir,folder,prots[i] + ' Inclusion List Area Filtered.csv')
+        target_file = pd.read_csv(data_list)
+        target_file = target_file.fillna(' ')
+        m_z_list = target_file['m/z'].tolist()
+        tstart_list = target_file['t start (min)'].tolist()
+        tend_list = target_file['t stop (min)'].tolist()
+        feature_RT = [round(((start + stop) / 2)*60,2) for start, stop in zip(tstart_list, tend_list)]
+        RT_orig_list = [np.zeros(7) for i in m_z_list]
+        score_list = np.zeros(len(m_z_list))
+        p_scores = np.zeros(len(m_z_list))
+        time = 20
+        peak_range = 30
+        decimal = 2
+        baseline = 1
+        
+        workbook = xlsxwriter.Workbook(os.path.join(parent_dir,folder,f'EICs of {prot}.xlsx'))
+        print(os.path.join(savedir,f'EICs of {prot}.xlsx'))
+        worksheet = workbook.add_worksheet()
+        for i,col in enumerate(target_file.columns):
+            column_name = xlsxwriter.utility.xl_col_to_name(i)
+            listing = target_file[col].tolist()
+            for j,element in enumerate(listing):
+                if j == 0:
+                    worksheet.write(column_name+str(j+1),target_file.columns[i])
+                worksheet.write(column_name+str(j+2),element)
+
+        for j,mz in enumerate(m_z_list):       # loop through each feature
+            RT_feature = feature_RT[j]
+            RT_origs = RT_orig_list[j]
+            e_score = score_list[j]
+            p_val = p_scores[j]
+            xs = []
+            xs_zoom = []
+            ys = []
+            max_array = []
+            for k in range(len(RTs_full)):             # loop through each replicate
+                RTs_rep = RTs_full[k]
+                RT_orig = RT_origs[k]
+                if RT_orig == 0:
+                    RT_orig = RT_feature
+                ints_rep = ints_full[k]
+                mzs_rep = mzs_full[k]
+
+                RT_idx_low = find_nearest(RTs_rep,RT_orig-time/2*60)[1]
+                RT_idx_high = find_nearest(RTs_rep,RT_orig+time/2*60)[1] 
+
+                RTs_slice = RTs_rep[RT_idx_low:RT_idx_high+1]
+
+                max_idx_low = find_nearest(RTs_slice,RT_orig-peak_range/2)[1]
+                max_idx_high = find_nearest(RTs_slice,RT_orig+peak_range/2)[1]
+
+                ints_slice = ints_rep[RT_idx_low:RT_idx_high+1]    # should take a slice of arrays for both of these
+                mzs_slice = mzs_rep[RT_idx_low:RT_idx_high+1]
+                mz_idx = [find_nearest_tol(entry,mz,10**(-decimal)/2)[1] for entry in mzs_slice] # find idx where the feature mz is in each scan
+
+                ints_EIC = [array[mz_idx[o]] if mz_idx[o] > 0 else baseline for o,array in enumerate(ints_slice)]
+
+                try:
+                    max_found = np.amax(ints_EIC[max_idx_low:max_idx_high])
+                except ValueError:
+                    max_found = np.amax(ints_EIC)
+                    #print(ints_EIC[max_idx_low:max_idx_high],ints_EIC)
+                max_array.append(max_found)
+                xs.append(RTs_slice)
+                xs_zoom.append(RTs_slice[max_idx_low:max_idx_high])
+                ys.append(ints_EIC)
+
+            #create the EIC as a regular figure to be saved and *probabaly* never looked at
+            fig, axs = plt.subplots(1,int(len(names)),figsize=(6*len(names),5),sharey=True)
+
+            for l,name in enumerate(names):
+                x = [t/60 for t in xs[l]]
+                y = ys[l]
+                axs[l].plot(x,y)
+                axs[l].set_title(f"EIC of {np.round(mz,decimal)} in {name}",fontsize=18)
+                axs[l].set_xlabel('Retention time (min)',fontsize=12)
+                axs[l].set_ylabel('Intensity',fontsize=12)
+                yfmt = mticker.ScalarFormatter(useMathText=True)
+                yfmt.set_powerlimits((3, 4))
+                axs[l].yaxis.set_major_formatter(yfmt)
+                axs[l].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+                axs[l].get_yaxis().get_offset_text().set_visible(False)
+                ax_max = max(axs[l].get_yticks())
+                exponent_axis = np.floor(np.log10(ax_max)).astype(int)
+                axs[l].annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+                             xy=(.01, .8), xycoords='axes fraction')
+            plt.tight_layout()
+            figname = f'EIC of mz of {np.round(mz,decimal)} at {np.round(RT_feature/60,1)}.png'
+            plt.savefig(os.path.join(savedir,figname),dpi = 150)
+            plt.close()
+
+            #create the EIC as a small figure to be inserted into the Excel
+            fig, axs = plt.subplots(1,int(len(names)),figsize=(2*len(names),2),sharey=True)
+            for l,name in enumerate(names):
+                x = [t/60 for t in xs[l]]
+                y = ys[l]
+                axs[l].plot(x,y)
+                axs[l].set_title(f"{np.round(mz,decimal)} in {name}",fontsize=6)
+                axs[l].set_xlabel('Retention time (min)',fontsize=5)
+                axs[l].set_ylabel('Intensity',fontsize=5)
+                yfmt = mticker.ScalarFormatter(useMathText=True)
+                yfmt.set_powerlimits((3, 4))
+                axs[l].yaxis.set_major_formatter(yfmt)
+                axs[l].tick_params(axis='both', which='major', labelsize=7)
+                axs[l].get_yaxis().get_offset_text().set_visible(False)
+                ax_max = max(axs[l].get_yticks())
+                exponent_axis = np.floor(np.log10(ax_max)).astype(int)
+                axs[l].annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+                             xy=(.01, .8), xycoords='axes fraction')
+            plt.tight_layout()
+            fignamesmall = f'EIC of mz of {np.round(mz,decimal)} at {np.round(RT_feature/60,1)} small.png'
+            plt.savefig(os.path.join(smallsavedir,fignamesmall),dpi = 150)
+            plt.close()
+
+            # Insert into Excel, after making the row bigger
+            worksheet.set_row(j+1,150)
+            worksheet.insert_image('H'+str(j+2),os.path.join(smallsavedir,fignamesmall),{'x_offset': 2, 'y_offset': 2})  
+            if j > num:
+                workbook.close()
+                break
+                
+# def inclusion_lists(data_dir,files_full,RTs_graphing,mzs_graphing,ps_graphing,z_graphing,
+#                     png_dir,prots,es_graphing,peps_sec,parent_dir,folder,feat_RT_cf_combined):
+#     get_RTs = MSExperiment()
+#     file_path = os.path.join(data_dir,files_full[0])
+#     MzMLFile().load(file_path,get_RTs)
+
+#     RT_start = get_RTs[0].getRT()
+#     RT_end = get_RTs[get_RTs.getNrSpectra()-1].getRT()
+#     n_bins = int(np.ceil(RT_end-RT_start))
+#     del get_RTs
+
+#     for i,RT_prot in enumerate(RTs_graphing):
+#         mzs = mzs_graphing[i]
+#         ps = ps_graphing[i]
+#         zs = z_graphing[i]
+#         plt.rcParams["figure.figsize"] = 10,5
+#         hist,bins = np.histogram(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+#         plt.hist(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+#         plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
+#         plt.savefig(os.path.join(png_dir,prots[i]+' specific features histogram.png'))   # bins too thin to see in output lmao
+#         plt.show()
+#         plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
+        
+#         fig,axs = plt.subplots(1,2,figsize=(14,14))
+#         score = es_graphing[i]
+#         bin_members = np.digitize(RT_prot,bins=np.linspace(RT_start,RT_end,n_bins))
+#         unique_members = np.unique(bin_members)
+#         new_score_array = []  
+#         for member in unique_members:
+#             repeats = np.where(bin_members == member)[0]
+#             scores_sub = [score[v] for v in repeats]
+#             if len(repeats) > peps_sec:
+#                 scores_sub_sorted = np.sort(scores_sub)   # sort from lowest to highest
+#                 while len(scores_sub) > peps_sec:
+#                     scores_sub = np.delete(scores_sub,np.where(scores_sub==scores_sub_sorted[0])[0][0])
+#                     scores_sub_sorted = np.delete(scores_sub_sorted,0)
+#             new_score_array = np.append(new_score_array,scores_sub)
+#         new_RT_array = [RT_prot[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+#         new_mz_array = [mzs[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+#         new_z_array = [zs[np.where(score==score_red)[0][0]] for score_red in new_score_array] 
+#         new_p_array = [ps[np.where(score==score_red)[0][0]] for score_red in new_score_array]
+#         axs[0].plot(score,RT_prot,'k.',markersize=10,label='Features removed')
+#         axs[0].plot(new_score_array,new_RT_array,'y.',label='Features remaining')
+#         axs[0].legend(loc='best')
+#         axs[1].scatter(score,[-np.log10(p) for p in ps],label='Original features',linewidths=6)
+#         axs[1].scatter(new_score_array,[-np.log10(p) for p in new_p_array],label='Features remaining')
+#         axs[1].set_xlabel('Enrichment Score',fontsize=20)
+#         axs[1].set_ylabel('-Log10(P value)',fontsize=20)
+#         plt.savefig(os.path.join(png_dir,prots[i] + ' specific features removed plot.png'))
+#         plt.show()
+       
+#         df = pd.DataFrame(columns=('Compound', 'Formula','Adduct','m/z','z'))
+#         for j in range(len(new_score_array)):
+#             A = 'EScore: ' + str(np.round(new_score_array[j],2)) + ' p value: ' + "{:.3e}".format(new_p_array[j][0]) + ' RTime: ' + str(np.round(new_RT_array[j],3))
+#             B = None
+#             C = '(no adduct)'
+#             D = np.round(new_mz_array[j],4)
+#             E = int(new_z_array[j])
+#             df.loc[j] = [A,B,C,D,E]
+#         df.to_csv(os.path.join(parent_dir,folder,prots[i] + ' Inclusion List.csv'),index=False)
+        
+#     plt.rcParams["figure.figsize"] = 10,5
+#     hist = np.histogram(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+#     plt.hist(feat_RT_cf_combined,bins=np.linspace(RT_start,RT_end,n_bins),density=False)
+#     plt.xlim(np.linspace(RT_start,RT_end,n_bins)[0],np.linspace(RT_start,RT_end,n_bins)[-1])
+#     plt.savefig(os.path.join(png_dir,'Consensus Map Histogram.png'))
+#     plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
+#     plt.show()
 
 def compare_known_binders(known_binders,prots,parent_dir,folder,feat_mz_combined_filtered,feat_mz_combined,feat_RT_cf_combined):
     if known_binders:
@@ -1381,9 +1706,3 @@ def plot_EIC(m_z_list,feature_RT,RT_orig_list,score_list,p_scores,areas,director
             plt.show()
         else:
             plt.close()
-
-
-
-
-
-
