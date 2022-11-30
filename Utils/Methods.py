@@ -496,7 +496,7 @@ def feature_int_extractor(m_z_feature_list,RT_feature_list,RTs_orig_list,mzs,RTs
             mzs_slice = Mz_rep_feature[RT_idx_low:RT_idx_high+1]
 #             noise = np.random.randint(noise_level-150,noise_level+150,len(RTs))   noise[np.random.randint(1,len(RTs))-1]
             mz_idx = [find_nearest_tol(entry,mz,10**(-decimal)/2)[1] for entry in mzs_slice] # find idx where the feature mz is in each scan
-            max_int_candidates = [array[mz_idx[o]] if mz_idx[o] > 0 else 1 for o,array in enumerate(ints_slice)]
+            max_int_candidates = [array[mz_idx[o]] if mz_idx[o] > 0 else 1 + np.random.randint(1,100000)/100000 for o,array in enumerate(ints_slice)]
             # use 15000 for baseline value
             int_feature = np.amax(max_int_candidates)
             idx_max = np.where(max_int_candidates == int_feature)[0][0]
@@ -542,7 +542,7 @@ def feature_int_extractor_start(m_z_feature_list,RT_feature_list,mzs,RTs,ints,LO
             mzs_slice = Mz_rep_feature[RT_idx_low:RT_idx_high+1]
 #             noise = np.random.randint(noise_level-150,noise_level+150,len(RTs))   noise[np.random.randint(1,len(RTs))-1]
             mz_idx = [find_nearest_tol(entry,mz,10**(-decimal)/2)[1] for entry in mzs_slice] # find idx where the feature mz is in each scan
-            max_int_candidates = [array[mz_idx[o]] if mz_idx[o] > 0 else 1 for o,array in enumerate(ints_slice)]
+            max_int_candidates = [array[mz_idx[o]] if mz_idx[o] > 0 else 1 + np.random.randint(1,100000)/100000 for o,array in enumerate(ints_slice)]
             # use 15000 for baseline value
             int_feature = np.amax(max_int_candidates)
             idx_max = np.where(max_int_candidates == int_feature)[0][0]
@@ -627,7 +627,7 @@ def feature_area_extractor_savgol(rt_windows_filt,int_windows_filt,check=False,
             width = width_start
             while not is_peaks:
                 if width < 0 or height < 0:
-                    feature_areas.append(1)  # placeholder non-zero value for scoring
+                    feature_areas.append(1 + np.random.randint(1,100000)/100000)  # placeholder non-zero value for scoring
                     break
                 peaks,props = find_peaks(rep_smoothed,width=[width,50],prominence=prominence,threshold=threshold,height=height,rel_height=rel_height)                
                 width = width - 1
