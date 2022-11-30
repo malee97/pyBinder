@@ -692,7 +692,7 @@ def enr_scoring(max_int_features,ref_val,prot_names,prots,reps=3,p_score_cutoff=
                 GH_ps = stats_out_GH['p-tukey'].values
                 id_list = []
                 for i,p in enumerate(GH_ps):
-                    if p <= 0.05:
+                    if p <= p_score_cutoff:
                         diff = stats_out_GH['diff'].values[i]
                         if diff > 0:
                             id_list.append(stats_out_GH['A'].values[i])
@@ -718,7 +718,7 @@ def enr_scoring(max_int_features,ref_val,prot_names,prots,reps=3,p_score_cutoff=
                 GH_ps = stats_out_GH['p_value'].values
                 id_list = []
                 for i,p in enumerate(GH_ps):
-                    if p <= 0.05:
+                    if p <= p_score_cutoff:
                         diff = stats_out_GH['mean_difference'].values[i]
                         if diff > 0:
                             id_list.append(stats_out_GH['A'].values[i])
