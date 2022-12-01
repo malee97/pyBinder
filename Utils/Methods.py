@@ -1022,7 +1022,7 @@ def volcano_plots_normalized(prots,es_normalized_graphing,es_normalized_nonspeci
             axs[i].plot([1,1],[min(p_spec+p_nonspec+p_unclear),max(p_spec+p_nonspec+p_unclear)],'k--')
             axs[i].set_xscale('log')
             axs[i].set_yscale('linear')
-            axs[i].set_xlim([1E-4,1E4])
+            axs[i,j].set_xlim([min(e_spec),max(e_spec)])
             axs[i].set_title(f'Volcano plot for {prots[i]}',fontsize=24)
             axs[i].set_xlabel('Enrichment Score',fontsize=20)
             axs[i].set_ylabel('-Log10(P value)',fontsize=20)
