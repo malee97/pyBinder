@@ -1,4 +1,4 @@
-Welcome to pyBinder Alpha 2! Created by Michael Lee
+Welcome to pyBinder! Created by Michael Lee
 If you run into any problems, please email me at mlee97@mit.edu :)
 
 Features:
