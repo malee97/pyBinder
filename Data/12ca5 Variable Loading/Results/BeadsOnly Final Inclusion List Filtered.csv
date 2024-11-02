@@ -1,0 +1,16 @@
+Compound,Formula,Adduct,m/z,z,t start (min),t stop (min)
+EScore: 0.79 FC: 8.9911p value: 9.208e-03 RTime: 15.447,,(no adduct),449.2311,4,5,25
+EScore: 0.76 FC: 9.2613p value: 2.602e-02 RTime: 16.482,,(no adduct),363.6126,5,6,26
+EScore: 0.71 FC: 9.211p value: 2.306e-02 RTime: 16.387,,(no adduct),387.5619,3,6,26
+EScore: 0.59 FC: 8.3735p value: 3.231e-02 RTime: 22.398,,(no adduct),413.9771,4,12,32
+EScore: 0.73 FC: 8.9831p value: 4.970e-03 RTime: 23.091,,(no adduct),435.4786,4,13,33
+EScore: 0.83 FC: 10.4303p value: 3.305e-05 RTime: 26.471,,(no adduct),427.9112,2,16,36
+EScore: 0.97 FC: 11.3357p value: 4.155e-05 RTime: 27.235,,(no adduct),364.6443,3,17,37
+EScore: 0.8 FC: 9.1854p value: 9.381e-04 RTime: 41.848,,(no adduct),319.5044,5,31,51
+EScore: 0.83 FC: 10.616p value: 4.143e-03 RTime: 42.135,,(no adduct),319.304,5,32,52
+EScore: 0.78 FC: 10.6324p value: 4.256e-02 RTime: 45.161,,(no adduct),402.9585,4,35,55
+EScore: 0.8 FC: 10.2457p value: 3.743e-02 RTime: 47.652,,(no adduct),405.8767,4,37,57
+EScore: 0.68 FC: 10.0156p value: 3.206e-02 RTime: 55.005,,(no adduct),509.2863,3,45,65
+EScore: 0.72 FC: 11.0314p value: 1.118e-02 RTime: 58.254,,(no adduct),469.001,2,48,68
+EScore: 0.69 FC: 8.53p value: 4.275e-02 RTime: 62.309,,(no adduct),614.9583,3,52,72
+EScore: 0.84 FC: 10.9488p value: 3.039e-03 RTime: 63.525,,(no adduct),449.912,4,53,73

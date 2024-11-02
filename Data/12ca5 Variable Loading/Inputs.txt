@@ -1,0 +1,32 @@
+Proteins Analyzed: ['12ca5', 'BeadsOnly']
+Name of selection: '20240220 12ca5 Variable loading test'
+Minimum enrichment score cutoff: 0.5
+Maximum p value cutoff: 0.05
+Estimated max peak retention time width (seconds): 300
+Estimated largest number of peptides that can coelute and be identified: 3
+Number of replicates per protein: 3
+Length of peptides in library: 13
+Starting concentration of library peptides (pM/member): 10
+Generate database of sequences for top candidate masses: False
+Number of masses used to generate sequence database: 500
+ppm tolerance used to generate sequence database: 5
+Fixed residues in library design: ['K']
+Locations of fixed residues (use Pythonic indexing, i.e. start at 0): [12]
+Length of peptide variable region: 12
+Peak detection threshold (counts): 50000.0
+Peak area limit: 100000.0
+Minimum enrichment score: 0.6
+Total time of gradient (min): 120
+Time of MS on (min): 3
+Time window used for inclusion list retention time and EICs: 10
+Estimated number of peptides that can be analyzed by spectrometer per minute: 10
+Limit of detection of spectrometer (counts): 15000.0
+Is the data centroided (necessary for usage on Unix): False
+Location of centroided data: 'C:\Users\Michael\Dropbox (MIT)\pyBinder\Data\Fold Change Testing\20240215 x4cx4ck Testing Fold Change 2024_02_16-02_16_34_PM\centroided'
+Do data visualizations: True
+Export full results (including features below score thresholds): True
+Pierce peptide retention calibration mix (PRTC) doped in for quantitation: False
+Concentration of PRTC: 10
+Number of EICs performed per protein: 100
+Perform additional EICs based only on enrichment score: True
+Monomer set used: {'A': 71.037113805, 'D': 115.026943065, 'E': 129.042593135, 'F': 147.068413945, 'G': 57.021463735, 'H': 137.058911875, 'K': 128.09496305, 'L': 113.084064015, 'M': 131.040484645, 'N': 114.04292747, 'P': 97.052763875, 'Q': 128.05857754, 'R': 156.10111105, 'S': 87.032028435, 'T': 101.047678505, 'V': 99.068413945, 'W': 186.07931298, 'Y': 163.063328575}

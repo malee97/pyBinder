@@ -1,0 +1,2 @@
+.featureXML filter=lfs diff=lfs merge=lfs -text
+.mzML filter=lfs diff=lfs merge=lfs -text
