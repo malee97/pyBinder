@@ -1,0 +1,24 @@
+Proteins Analyzed: ['12ca5', 'ACE2']
+Name of selection: '20240416 12ca5 vs ACE2 Retrospect'
+Minimum enrichment score cutoff: 0.5
+Maximum p value cutoff: 0.134
+Estimated max peak retention time width (seconds): 45
+Time window used to find feature peak (seconds): 300
+Estimated largest number of peptides that can coelute and be identified: 3
+Number of replicates per protein: 3
+Length of peptides in library: 13
+Starting concentration of library peptides (pM/member): 1
+Peak detection threshold (counts): 50000.0
+Peak area limit: 10000.0
+Minimum enrichment score: 0.6
+Total time of gradient (min): 120
+Time of MS on (min): 3
+Time window used for inclusion list retention time and EICs: 10
+Estimated number of peptides that can be analyzed by spectrometer per minute: 10
+Limit of detection of spectrometer (counts): 15000.0
+Is the data centroided (necessary for usage on Unix): False
+Location of centroided data: '/Volumes/Michael Lee/Lumos_Data/20240330 - 362-058 12ca5 vs WDR5 X12K/20240331 12ca5 vs WDR5 X12K 2024_03_31-11_32_19_PM/centroided'
+Do data visualizations: True
+Export full results (including features below score thresholds): True
+Number of EICs performed per protein: 5
+Perform additional EICs based only on enrichment score: False
